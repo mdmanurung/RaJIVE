@@ -104,3 +104,58 @@ showVarExplained_robust(ajive.results.robust, data.ajive)
 #> $Resid
 #> [1] 0.1351778 0.2493886 0.4280103
 ```
+
+  - Block scores and loadings:
+
+<!-- end list -->
+
+``` r
+# Joint scores for block 1
+get_block_scores(ajive.results.robust, k = 1, type = "joint")
+
+# Individual loadings for block 2
+get_block_loadings(ajive.results.robust, k = 2, type = "individual")
+```
+
+### Jackstraw significance testing
+
+After running the RaJIVE decomposition, you can test which variables in
+each data block have statistically significantly non-zero joint loadings
+using the jackstraw permutation test:
+
+``` r
+# Run jackstraw test (increase n_null to 50-100 for publication-quality results)
+js <- jackstraw_rajive(ajive.results.robust, data.ajive,
+                       alpha = 0.05, n_null = 10,
+                       correction = "bonferroni")
+
+# Print a concise summary table
+print(js)
+
+# Get a data frame summary
+summary(js)
+```
+
+  - Retrieve significant variables for a given block and component:
+
+<!-- end list -->
+
+``` r
+get_significant_vars(js, block = 1, component = 1)
+```
+
+  - Visualize jackstraw results (three plot types available):
+
+<!-- end list -->
+
+``` r
+# P-value histogram
+plot_jackstraw(js, type = "pvalue_hist", block = 1, component = 1)
+
+# F-statistic vs -log10(p-value) scatter plot
+plot_jackstraw(js, type = "scatter", block = 1, component = 1)
+
+# Heatmap of -log10(p-value) across all joint components for one block
+plot_jackstraw(js, type = "loadings_significance", block = 1)
+```
+
