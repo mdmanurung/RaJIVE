@@ -26,7 +26,8 @@
 
 
 Rajive <- function(blocks, initial_signal_ranks, full=TRUE,
-                           n_wedin_samples=1000, n_rand_dir_samples=1000, joint_rank=NA)
+                           n_wedin_samples=1000, n_rand_dir_samples=1000, joint_rank=NA,
+                           num_cores=1L)
 {
 
   K <- length(blocks)
@@ -36,9 +37,9 @@ Rajive <- function(blocks, initial_signal_ranks, full=TRUE,
   # initial estimate of signal space with SVD
 
   # apply svd to all element in the list
-  block_svd <- parallel::mclapply(blocks, get_svd_robustH)
+  block_svd <- parallel::mclapply(blocks, get_svd_robustH, mc.cores=num_cores)
   # extract singular values from list
-  singular_values = parallel::mclapply(block_svd, function(l) l[[1]])
+  singular_values = parallel::mclapply(block_svd, function(l) l[[1]], mc.cores=num_cores)
   # apply get_sv_threshold
   sv_thresholds <- mapply(function(l,p)
     get_sv_threshold(l, rank = p), singular_values, initial_signal_ranks)
@@ -51,7 +52,8 @@ Rajive <- function(blocks, initial_signal_ranks, full=TRUE,
   out <- get_joint_scores_robustH(blocks, block_svd, initial_signal_ranks, sv_thresholds,
                                   n_wedin_samples=n_wedin_samples,
                                   n_rand_dir_samples=n_rand_dir_samples,
-                                  joint_rank=joint_rank)
+                                  joint_rank=joint_rank,
+                                  num_cores=num_cores)
   joint_rank_sel_results <- out$rank_sel_results
   joint_scores <- out$joint_scores
 
@@ -101,6 +103,7 @@ get_sv_threshold <- function(singular_values, rank){
 #' @param n_wedin_samples Integer. Number of wedin bound samples to draw for each data matrix.
 #' @param n_rand_dir_samples Integer. Number of random direction bound samples to draw.
 #' @param joint_rank Integer or NA. User specified joint_rank. If NA will be estimated from data.
+#' @param num_cores Integer. Number of cores for parallel resampling.
 #' @importFrom stats quantile
 #'
 #'
@@ -108,7 +111,7 @@ get_sv_threshold <- function(singular_values, rank){
 
 get_joint_scores_robustH <- function(blocks, block_svd, initial_signal_ranks, sv_thresholds,
                                      n_wedin_samples=1000, n_rand_dir_samples=1000,
-                                     joint_rank=NA){
+                                     joint_rank=NA, num_cores=2){
 
 
   if(is.na(n_wedin_samples) & is.na(n_rand_dir_samples) & is.na(joint_rank)){
@@ -139,11 +142,14 @@ get_joint_scores_robustH <- function(blocks, block_svd, initial_signal_ranks, sv
     # maybe comptue wedin bound
     if(!is.na(n_wedin_samples)){
 
-      block_wedin_samples <- t(mapply(function(l,m) get_wedin_bound_samples(l,
-                                                                            m,
-                                                                            signal_rank=initial_signal_ranks[k],
-                                                                            num_samples=n_wedin_samples),
-                                      blocks, block_svd))
+      # NOTE: use explicit loop (not mapply) so each block gets its own
+      # signal_rank correctly, avoiding variable-capture from the outer loop.
+      block_wedin_samples <- t(do.call(rbind, lapply(seq_along(blocks), function(k)
+        get_wedin_bound_samples(blocks[[k]],
+                                block_svd[[k]],
+                                signal_rank=initial_signal_ranks[k],
+                                num_samples=n_wedin_samples,
+                                num_cores=num_cores))))
 
 
 
@@ -162,7 +168,8 @@ get_joint_scores_robustH <- function(blocks, block_svd, initial_signal_ranks, sv
     if(!is.na(n_rand_dir_samples)){
 
       rand_dir_samples <- get_random_direction_bound_robustH(n_obs=n_obs, dims=initial_signal_ranks,
-                                                             num_samples=n_rand_dir_samples)
+                                                             num_samples=n_rand_dir_samples,
+                                                             num_cores=num_cores)
       rand_dir_svsq_threshold <- quantile(rand_dir_samples, .95)
 
       rank_sel_results[['rand_dir']] <- list(rand_dir_samples=rand_dir_samples,

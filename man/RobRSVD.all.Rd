@@ -14,8 +14,9 @@ RobRSVD.all(data, nrank = min(dim(data)), svdinit = svd(data))
 \item{svdinit}{List. The standard SVD.}
 }
 \value{
-List. The SVD of X.
+List with entries \code{d}, \code{u}, \code{v}.
 }
 \description{
-Computes the robust SVD of a matrix
+Thin R wrapper around the RcppArmadillo implementation \code{RobRSVD_all_cpp}.
+The interface and return value are identical to the original pure-R version.
 }

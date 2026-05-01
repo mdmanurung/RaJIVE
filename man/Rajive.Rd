@@ -10,7 +10,8 @@ Rajive(
   full = TRUE,
   n_wedin_samples = 1000,
   n_rand_dir_samples = 1000,
-  joint_rank = NA
+  joint_rank = NA,
+  num_cores = 1L
 )
 }
 \arguments{

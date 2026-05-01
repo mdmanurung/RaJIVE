@@ -4,7 +4,7 @@
 \alias{get_wedin_bound_samples}
 \title{Gets the wedin bounds}
 \usage{
-get_wedin_bound_samples(X, SVD, signal_rank, num_samples = 1000)
+get_wedin_bound_samples(X, SVD, signal_rank, num_samples = 1000, num_cores = 2)
 }
 \arguments{
 \item{X}{Matrix. The data matrix.}

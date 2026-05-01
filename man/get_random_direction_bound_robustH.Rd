@@ -4,7 +4,12 @@
 \alias{get_random_direction_bound_robustH}
 \title{Estimate the wedin bound for a data matrix.}
 \usage{
-get_random_direction_bound_robustH(n_obs, dims, num_samples = 1000)
+get_random_direction_bound_robustH(
+  n_obs,
+  dims,
+  num_samples = 1000,
+  num_cores = 2
+)
 }
 \arguments{
 \item{n_obs}{The number of observations.}

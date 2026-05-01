@@ -4,7 +4,13 @@
 \alias{wedin_bound_resampling}
 \title{Resampling procedure for the wedin bound}
 \usage{
-wedin_bound_resampling(X, perp_basis, right_vectors, num_samples = 1000)
+wedin_bound_resampling(
+  X,
+  perp_basis,
+  right_vectors,
+  num_samples = 1000,
+  num_cores = 2
+)
 }
 \arguments{
 \item{X}{Matrix. The data matrix.}

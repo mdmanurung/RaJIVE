@@ -11,7 +11,8 @@ get_joint_scores_robustH(
   sv_thresholds,
   n_wedin_samples = 1000,
   n_rand_dir_samples = 1000,
-  joint_rank = NA
+  joint_rank = NA,
+  num_cores = 2
 )
 }
 \arguments{
@@ -28,6 +29,8 @@ get_joint_scores_robustH(
 \item{n_rand_dir_samples}{Integer. Number of random direction bound samples to draw.}
 
 \item{joint_rank}{Integer or NA. User specified joint_rank. If NA will be estimated from data.}
+
+\item{num_cores}{Integer. Number of cores for parallel resampling.}
 }
 \description{
 Estimate the joint rank with the wedin bound, compute the signal scores SVD, double check each joint component.

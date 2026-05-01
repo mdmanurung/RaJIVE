@@ -22,10 +22,13 @@ Suggests:
     reshape2,
     dplyr,
     pkgdown
-Imports: ggplot2, 
+Imports: ggplot2,
 	doParallel,
-        foreach,
-        stats
+	foreach,
+	stats,
+	Rcpp,
+	parallel
+LinkingTo: Rcpp, RcppArmadillo
 URL: https://mdmanurung.github.io/RaJIVEutils/
 BugReports: https://github.com/mdmanurung/RaJIVEutils/issues
 RoxygenNote: 7.3.2

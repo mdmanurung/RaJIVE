@@ -80,20 +80,23 @@ svd_reconstruction <- function(decomposition){
 #' @param num_samples Integer. Number of vectors selected for resampling procedure.
 
 
-get_wedin_bound_samples <- function(X, SVD, signal_rank, num_samples=1000){
+get_wedin_bound_samples <- function(X, SVD, signal_rank, num_samples=1000,
+                                    num_cores=2){
 
   # resample for U and V
   U_perp <- SVD[['u']][ , -(1:signal_rank)]
   U_sampled_norms <- wedin_bound_resampling(X=X,
                                             perp_basis=U_perp,
                                             right_vectors=FALSE,
-                                            num_samples=num_samples)
+                                            num_samples=num_samples,
+                                            num_cores=num_cores)
 
   V_perp <- SVD[['v']][ , -(1:signal_rank)]
   V_sampled_norms <- wedin_bound_resampling(X=X,
                                             perp_basis=V_perp,
                                             right_vectors=TRUE,
-                                            num_samples=num_samples)
+                                            num_samples=num_samples,
+                                            num_cores=num_cores)
 
   sigma_min <- SVD[['d']][signal_rank]
   wedin_bound_samples <- mapply(function(u, v)  min(max(u, v)/sigma_min, 1)^2, U_sampled_norms, V_sampled_norms)
@@ -109,11 +112,11 @@ get_wedin_bound_samples <- function(X, SVD, signal_rank, num_samples=1000){
 #' @param num_samples Integer. Number of vectors selected for resampling procedure.
 #' @importFrom foreach %dopar%
 
-wedin_bound_resampling <- function(X, perp_basis, right_vectors, num_samples=1000){
+wedin_bound_resampling <- function(X, perp_basis, right_vectors, num_samples=1000,
+                                   num_cores=2){
 
   rank <- dim(perp_basis)[2]
-  #resampled_norms <- rep(0, num_samples)
-  numCores <- 2
+  numCores <- max(1L, as.integer(num_cores))
   doParallel::registerDoParallel(numCores)
   resampled_norms <- foreach::foreach (s=1:num_samples) %dopar% {
 
@@ -149,14 +152,15 @@ wedin_bound_resampling <- function(X, perp_basis, right_vectors, num_samples=100
 #'
 #' @return rand_dir_samples
 
-get_random_direction_bound_robustH <- function(n_obs, dims, num_samples=1000){
+get_random_direction_bound_robustH <- function(n_obs, dims, num_samples=1000,
+                                               num_cores=2){
 
 dims1 = as.list(dims)
 n_blocks <- length(dims)
-numCores <- 2
+numCores <- max(1L, as.integer(num_cores))
 doParallel::registerDoParallel(numCores)
 
-rand_dir_samples <- foreach::foreach (s=1:num_samples, .export=c("get_svd_robustH", "RobRSVD.all", "RobRSVD1")) %dopar% {
+rand_dir_samples <- foreach::foreach (s=1:num_samples, .export=c("get_svd_robustH", "RobRSVD.all", "RobRSVD1", "RobRSVD_all_cpp", "RobRSVD1_cpp")) %dopar% {
 
   X <- lapply(dims1, function(l) matrix(rnorm(n_obs * l, mean=0,sd=1), n_obs, l))
   rand_subspaces <- lapply(X, function(l) get_svd_robustH(l)[['u']])
