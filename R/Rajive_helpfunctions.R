@@ -441,6 +441,14 @@ showVarExplained_robust <- function(ajiveResults, blocks){
 # Utility functions for interpreting RaJIVE results
 # ---------------------------------------------------------------------------
 
+# Internal helper: number of data blocks from a rajive decomposition.
+# block_decomps is a 3 x K list-matrix from mapply, stored column-by-column:
+#   [ I_1, J_1, E_1, I_2, J_2, E_2, ... ]
+# where I = individual, J = joint, E = noise.  So length(block_decomps) == 3*K.
+n_blocks_from_decomp <- function(ajive_output) {
+  length(ajive_output$block_decomps) / 3L
+}
+
 #' Print method for rajive objects
 #'
 #' Displays a concise summary of the RaJIVE decomposition: number of blocks,
@@ -462,7 +470,7 @@ showVarExplained_robust <- function(ajiveResults, blocks){
 #'
 #' @export
 print.rajive <- function(x, ...) {
-  K <- length(x$block_decomps) / 3L
+  K <- n_blocks_from_decomp(x)
   cat("RaJIVE Decomposition\n")
   cat(sprintf("  Number of blocks : %d\n", K))
   cat(sprintf("  Joint rank       : %d\n", x$joint_rank))
@@ -512,7 +520,8 @@ summary.rajive <- function(object, ...) {
 #'
 #' @param ajive_output List returned by \code{\link{Rajive}}.
 #'
-#' @return An \eqn{n \times \text{joint\_rank}} numeric matrix of joint scores.
+#' @return An \eqn{n \times r_J} numeric matrix of joint scores, where
+#'   \eqn{r_J} is the joint rank.
 #'
 #' @examples
 #' \donttest{
@@ -556,6 +565,7 @@ get_joint_scores <- function(ajive_output) {
 #' @export
 get_block_matrix <- function(ajive_output, k, type = c("joint", "individual", "noise")) {
   type <- match.arg(type)
+  # block_decomps layout per block k: individual at 3k-2, joint at 3k-1, noise at 3k
   if (type == "joint")       return(ajive_output$block_decomps[[3L * (k - 1L) + 2L]][["full"]])
   if (type == "individual")  return(ajive_output$block_decomps[[3L * (k - 1L) + 1L]][["full"]])
   if (type == "noise")       return(ajive_output$block_decomps[[3L * k]])
@@ -583,7 +593,7 @@ get_block_matrix <- function(ajive_output, k, type = c("joint", "individual", "n
 #'
 #' @export
 get_all_ranks <- function(ajive_output) {
-  K <- length(ajive_output$block_decomps) / 3L
+  K <- n_blocks_from_decomp(ajive_output)
   indiv_ranks <- vapply(seq_len(K),
                         function(k) get_individual_rank(ajive_output, k),
                         numeric(1L))

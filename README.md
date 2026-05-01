@@ -243,7 +243,7 @@ plot_jackstraw(js, type = "loadings_significance", block = 1)
 
 | Function | Description |
 | --- | --- |
-| `get_joint_scores()` | Return the shared n × joint\_rank joint score matrix. |
+| `get_joint_scores()` | Return the shared n × r\_J joint score matrix (r\_J = joint rank). |
 | `get_block_scores()` | Return the score matrix (U) for a given block and component type (joint or individual). |
 | `get_block_loadings()` | Return the loading matrix (V) for a given block and component type. |
 | `get_block_matrix()` | Return the full reconstructed matrix (J, I, or E) for a given block and component type. |
