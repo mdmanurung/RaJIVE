@@ -69,6 +69,14 @@ reference:
       - data_heatmap
       - plot_scores
 
+  - title: "Diagnostics and interpretation"
+    desc: "Unified helpers for AJIVE diagnostics, association testing, and stability assessment."
+    contents:
+      - extract_components
+      - plot_components
+      - associate_components
+      - assess_stability
+
   - title: "Internal decomposition helpers"
     desc: "Low-level functions used internally by `Rajive()` to compute joint and individual decompositions."
     contents:

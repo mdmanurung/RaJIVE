@@ -40,6 +40,10 @@ The computational cost scales with:
 This vignette benchmarks these three axes and provides a practical guide for
 choosing `n_null` given data size.
 
+All timing/memory runs use the current `jackstraw_rajive()` default
+multiple-testing behavior (`correction = "BH"`), applied globally across
+all block/component/feature tests in each run.
+
 ---
 
 ## Setup

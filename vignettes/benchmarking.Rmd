@@ -21,6 +21,7 @@ data_dir  <- "data"        # relative to vignettes/
 ```
 
 
+
 ## Introduction
 
 `rajiveplus` reimplements the Robust aJIVE decomposition with a C++
@@ -47,6 +48,12 @@ stochastic rank estimation, ensuring clean timing comparisons.
 single-core.  Head-to-head comparisons therefore always use `num_cores = 2`
 for `rajiveplus` as well.
 
+**Scope note:** This vignette benchmarks core decomposition performance
+(`Rajive()` and related internals). New interpretation helpers such as
+`extract_components()`, `plot_components()`, `associate_components()`,
+and `assess_stability()` are covered in the README and application
+vignettes rather than timing-focused benchmarks.
+
 ---
 
 ## Setup
@@ -57,6 +64,7 @@ Install `RaJIVE` from GitHub if not yet available:
 if (!requireNamespace("RaJIVE", quietly = TRUE))
   remotes::install_github("ericaponzi/RaJIVE")
 ```
+
 
 
 Load packages using `::` throughout to avoid namespace conflicts (both
@@ -71,12 +79,14 @@ library(ggplot2)
 ```
 
 
+
 Pre-register **one** doParallel cluster of 2 workers before any benchmark
 call to avoid paying cluster spin-up cost inside every `RaJIVE::Rajive()`:
 
 ```{r}
 doParallel::registerDoParallel(2L)
 ```
+
 
 
 Simulate the benchmark dataset (K=2 blocks, n=100 samples, p=500 features):
@@ -87,6 +97,7 @@ Y      <- ajive.data.sim(K = 2, rankJ = 2, rankA = c(5, 5),
                          n = 100, pks = c(500, 500))
 blocks <- Y$sim_data
 ```
+
 
 
 ---
@@ -106,6 +117,7 @@ cat("rajiveplus:", round(t_ru["elapsed"], 2), "s\n")
 cat("RaJIVE:     ", round(t_rj["elapsed"], 2), "s\n")
 cat("Speedup:    ", round(t_rj["elapsed"] / t_ru["elapsed"], 1), "x\n")
 ```
+
 
 
 ---
@@ -136,6 +148,7 @@ autoplot(bm_mb) +
        x = "Time (ms)", y = NULL) +
   theme_bw()
 ```
+
 
 
 ---
@@ -173,6 +186,7 @@ plot(bm_bench) +
        subtitle = "R-heap allocations only; see peakRAM for total RSS") +
   theme_bw()
 ```
+
 
 
 ---
@@ -266,6 +280,7 @@ knitr::kable(speedup_df,
 ```
 
 
+
 ---
 
 ## Parallelism Scaling (rajiveplus only)
@@ -324,6 +339,7 @@ if (requireNamespace("patchwork", quietly = TRUE)) {
 ```
 
 
+
 ---
 
 ## Memory Comparison
@@ -365,6 +381,7 @@ ggplot(peakram_df, aes(x = package, y = peak_ram_mb, fill = package)) +
        x = NULL, y = "Peak RAM (MiB)") +
   theme_bw() + theme(legend.position = "none")
 ```
+
 
 
 > **Why peakRAM?**  R's `bench::mark` `mem_alloc` column measures only R-heap
