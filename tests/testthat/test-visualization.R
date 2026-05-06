@@ -309,6 +309,168 @@ test_that("G2: survival split mode emits anti-conservative warning", {
   )
 })
 
+# ---------------------------------------------------------------------------
+# H. rank_features — return schema and correctness tests
+# ---------------------------------------------------------------------------
+
+# Shared jackstraw fixture (lazy, computed once)
+.viz_jsr <- local({
+  set.seed(99L)
+  jackstraw_rajive(.viz_fit, ajive.data.sim(K = 2, rankJ = 2, rankA = c(4, 3),
+                                            n = 40L, pks = c(30L, 20L),
+                                            dist.type = 1)$sim_data,
+                   n_null = 5L)
+})
+
+test_that("H1: top_loadings returns correct columns and respects n", {
+  fit <- .viz_fit
+  out <- rank_features(fit, mode = "top_loadings", type = "joint", n = 5L)
+
+  expect_true(is.data.frame(out))
+  expect_true(all(c("block", "component", "type", "feature_index",
+                    "feature_name", "loading", "abs_loading", "rank") %in% names(out)))
+  # n = 5 per block x component combination
+  expect_true(all(out$rank <= 5L))
+  # ranking is by abs_loading descending within each block x component
+  for (bc in unique(paste(out$block, out$component))) {
+    sub <- out[paste(out$block, out$component) == bc, ]
+    expect_true(all(diff(sub$abs_loading) <= 0))
+  }
+})
+
+test_that("H2: top_loadings signed=TRUE preserves sign; signed=FALSE gives abs values", {
+  fit     <- .viz_fit
+  out_s   <- rank_features(fit, mode = "top_loadings", type = "individual",
+                            block = 1L, component = 1L, n = 10L, signed = TRUE)
+  out_u   <- rank_features(fit, mode = "top_loadings", type = "individual",
+                            block = 1L, component = 1L, n = 10L, signed = FALSE)
+
+  expect_true(all(out_u$loading >= 0))
+  expect_equal(abs(out_s$loading), out_s$abs_loading)
+  expect_equal(out_u$loading, out_s$abs_loading)
+})
+
+test_that("H3: contribution mode adds contribution column, contributions are positive", {
+  fit <- .viz_fit
+  out <- rank_features(fit, mode = "contribution", type = "joint",
+                       block = 1L, component = 1L, n = 10L,
+                       method = "variance_contrib")
+
+  expect_true("contribution" %in% names(out))
+  expect_true(all(out$contribution >= 0))
+  expect_true(all(out$contribution <= 1))
+  # top feature has highest contribution
+  expect_true(all(diff(out$contribution) <= 0))
+})
+
+test_that("H4: contribution abs_loading method contributions are positive and rank-ordered", {
+  fit <- .viz_fit
+  out <- rank_features(fit, mode = "contribution", type = "individual",
+                       block = 1L, n = 5L, method = "abs_loading")
+
+  expect_true(all(out$contribution >= 0))
+  for (bc in unique(paste(out$block, out$component))) {
+    sub <- out[paste(out$block, out$component) == bc, ]
+    expect_true(all(diff(sub$contribution) <= 0))
+  }
+})
+
+test_that("H5: overlap mode returns correct columns and scores in [0, 1]", {
+  fit <- .viz_fit
+  out <- rank_features(fit, mode = "overlap", type = "joint",
+                       component = 1L, n = 10L, method = "jaccard")
+
+  expect_true(is.data.frame(out))
+  expect_true(all(c("component", "type", "block_i", "block_j",
+                    "top_n", "method", "n_intersect", "overlap_score") %in% names(out)))
+  expect_true(all(out$overlap_score >= 0 & out$overlap_score <= 1, na.rm = TRUE))
+  expect_true(all(out$block_i < out$block_j))  # upper triangle
+})
+
+test_that("H6: overlap overlap_coef method gives valid scores", {
+  fit <- .viz_fit
+  out <- rank_features(fit, mode = "overlap", type = "individual",
+                       n = 5L, method = "overlap_coef")
+
+  expect_true(all(out$overlap_score >= 0 & out$overlap_score <= 1, na.rm = TRUE))
+})
+
+test_that("H7: significant mode returns correct columns for jackstraw result", {
+  jsr <- .viz_jsr
+  out <- rank_features(jackstraw_result = jsr, mode = "significant")
+
+  expect_true(is.data.frame(out))
+  expect_true(all(c("block", "component", "feature_index",
+                    "p_value", "p_adj", "significant") %in% names(out)))
+  expect_true(all(out$p_value >= 0 & out$p_value <= 1))
+  expect_true(is.logical(out$significant))
+})
+
+test_that("H8: significant mode block/component filtering works", {
+  jsr    <- .viz_jsr
+  out_all  <- rank_features(jackstraw_result = jsr, mode = "significant")
+  out_b1   <- rank_features(jackstraw_result = jsr, mode = "significant",
+                             block = 1L)
+  out_b2   <- rank_features(jackstraw_result = jsr, mode = "significant",
+                             block = 2L)
+
+  expect_true(all(out_b1$block == 1L))
+  expect_true(all(out_b2$block == 2L))
+  expect_equal(nrow(out_all), nrow(out_b1) + nrow(out_b2))
+})
+
+test_that("H9: n larger than feature count returns all features", {
+  fit <- .viz_fit
+  # block 2 has 20 features; requesting 100 should return all 20
+  out <- rank_features(fit, mode = "top_loadings", type = "joint",
+                       block = 2L, component = 1L, n = 100L)
+  # joint loadings for block 2 have 20 rows
+  expect_equal(nrow(out), 20L)
+})
+
+test_that("H10: invalid method for mode raises error", {
+  fit <- .viz_fit
+  expect_error(
+    rank_features(fit, mode = "top_loadings", method = "jaccard"),
+    regexp = "not valid for mode"
+  )
+  expect_error(
+    rank_features(fit, mode = "overlap", method = "abs_loading"),
+    regexp = "not valid for mode"
+  )
+})
+
+test_that("H11: significant mode errors without jackstraw_result", {
+  expect_error(
+    rank_features(mode = "significant"),
+    regexp = "jackstraw_result.*must be provided"
+  )
+})
+
+test_that("H12: aliases delegate correctly to rank_features", {
+  fit <- .viz_fit
+
+  tl  <- get_top_loadings(fit, block = 1L, component = 1L, n = 5L)
+  fc  <- get_feature_contributions(fit, block = 1L, component = 1L)
+  ov  <- compare_feature_sets_across_blocks(fit, component = 1L, n = 10L)
+  sv  <- summarize_significant_vars(.viz_jsr, block = 1L)
+
+  expect_true(is.data.frame(tl))
+  expect_true("rank" %in% names(tl))
+  expect_true("contribution" %in% names(fc))
+  expect_true("overlap_score" %in% names(ov))
+  expect_true("p_value" %in% names(sv))
+  expect_true(all(sv$block == 1L))
+})
+
+test_that("H13: summarize_significant_vars top_n argument limits rows per group", {
+  jsr <- .viz_jsr
+  sv  <- summarize_significant_vars(jsr, top_n = 3L)
+
+  counts <- table(paste(sv$block, sv$component))
+  expect_true(all(counts <= 3L))
+})
+
 test_that("G3: assess_stability(loadings) returns aligned loading summaries", {
   set.seed(123)
   Y <- ajive.data.sim(K = 2, rankJ = 1, rankA = c(2, 2),

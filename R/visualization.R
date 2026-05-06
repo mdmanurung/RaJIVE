@@ -2,16 +2,28 @@
 #
 # Public API:
 #   extract_components()   — extract tidy data / diagnostic payload from Rajive output
+#   rank_features()        — rank features by loading, contribution, overlap, or significance
 #   plot_components()      — unified plotting entry point
 #   associate_components() — association between component scores and metadata
 #   assess_stability()     — bootstrap stability assessment (joint rank / loadings)
+#
+# Aliases (thin wrappers over rank_features):
+#   get_top_loadings()
+#   get_feature_contributions()
+#   compare_feature_sets_across_blocks()
+#   summarize_significant_vars()
 #
 # Internal helpers (not exported):
 #   .extract_rank_diagnostics()
 #   .plot_rank_threshold()
 #   .plot_bound_distributions()
 #   .plot_ajive_diagnostic()
-#   .procrustes_align()    — orthogonal Procrustes alignment for loading stability
+#   .procrustes_align()       — orthogonal Procrustes alignment for loading stability
+#   .rf_resolve_method()      — method validation for rank_features
+#   .rf_get_loadings()        — loading matrix accessor for rank_features
+#   .rf_loading_df()          — top_loadings / contribution worker
+#   .rf_overlap()             — overlap worker
+#   .rf_significant()         — significant worker
 
 
 # ---------------------------------------------------------------------------
@@ -974,5 +986,400 @@ assess_stability <- function(ajive_output = NULL,
   P     <- crossprod(A, B)          # t(A) %*% B
   sv    <- svd(P)
   sv$v %*% t(sv$u)
+}
+
+
+# ---------------------------------------------------------------------------
+# rank_features
+# ---------------------------------------------------------------------------
+
+#' Rank and summarize features from a Rajive decomposition
+#'
+#' Returns a tidy \code{data.frame} of features ranked by their loading,
+#' proportional contribution, pairwise feature-set overlap, or jackstraw
+#' significance, depending on \code{mode}.
+#'
+#' @param ajive_output An object of class \code{"rajive"} (output of
+#'   \code{\link{Rajive}}).  Required for \code{mode} in
+#'   \code{"top_loadings"}, \code{"contribution"}, and \code{"overlap"}.
+#'   May be \code{NULL} for \code{mode = "significant"}.
+#' @param blocks Not currently used; reserved for future feature-name lookup
+#'   against the original data matrices.
+#' @param jackstraw_result An object of class \code{"jackstraw_rajive"} (output
+#'   of \code{\link{jackstraw_rajive}}).  Required for
+#'   \code{mode = "significant"}.
+#' @param mode Character scalar.  One of:
+#'   \describe{
+#'     \item{\code{"top_loadings"}}{Return the top \code{n} features per
+#'       block \eqn{\times} component by absolute loading.}
+#'     \item{\code{"contribution"}}{Return the top \code{n} features per
+#'       block \eqn{\times} component by their normalized contribution score.
+#'       For \code{method = "abs_loading"}: \eqn{|w_i| / \sum |w_j|}.
+#'       For \code{method = "variance_contrib"}:
+#'       \eqn{w_i^2 / \sum w_j^2}.}
+#'     \item{\code{"overlap"}}{Compute pairwise Jaccard or overlap-coefficient
+#'       between the top-\code{n} feature sets of each pair of blocks for each
+#'       requested component.}
+#'     \item{\code{"significant"}}{Return all features from a jackstraw result
+#'       with their p-values and significance calls, sorted by block, component,
+#'       and p-value.}
+#'   }
+#' @param type Character.  \code{"joint"} (default) or \code{"individual"}.
+#'   Selects which loading matrix is used.
+#' @param block Integer or \code{NULL}.  Block index to restrict results to.
+#'   When \code{NULL} (default), all blocks are included.
+#' @param component Integer or \code{NULL}.  Component index to restrict
+#'   results to.  When \code{NULL} (default), all components are included.
+#' @param n Integer.  Number of top features returned per block
+#'   \eqn{\times} component (for \code{mode} in \code{"top_loadings"},
+#'   \code{"contribution"}).  Also the feature-set size used in
+#'   \code{mode = "overlap"}.  Default 20.
+#' @param signed Logical.  When \code{TRUE} (default), the \code{loading}
+#'   column retains the sign of the original loading.  When \code{FALSE},
+#'   the absolute value is stored.  Ignored for \code{mode} in
+#'   \code{"overlap"} and \code{"significant"}.
+#' @param method Character or \code{NULL}.  Scoring or overlap method.
+#'   For \code{mode} in \code{"top_loadings"} and \code{"contribution"}:
+#'   \code{"abs_loading"} (default) or \code{"variance_contrib"}.
+#'   For \code{mode = "overlap"}: \code{"jaccard"} (default) or
+#'   \code{"overlap_coef"}.
+#'   Ignored for \code{mode = "significant"}.
+#' @param ... Reserved for future arguments.
+#'
+#' @return A \code{data.frame}.  Column set depends on \code{mode}:
+#'   \describe{
+#'     \item{\code{"top_loadings"}}{
+#'       \code{block}, \code{component}, \code{type},
+#'       \code{feature_index}, \code{feature_name},
+#'       \code{loading}, \code{abs_loading}, \code{rank}.}
+#'     \item{\code{"contribution"}}{
+#'       Same as \code{"top_loadings"} plus \code{contribution}.}
+#'     \item{\code{"overlap"}}{
+#'       \code{component}, \code{type}, \code{block_i}, \code{block_j},
+#'       \code{top_n}, \code{method}, \code{n_intersect},
+#'       \code{overlap_score}.}
+#'     \item{\code{"significant"}}{
+#'       \code{block}, \code{component}, \code{feature_index},
+#'       \code{p_value}, \code{p_adj}, \code{significant}.}
+#'   }
+#'   Returns \code{NULL} (with a message) when no valid block/component
+#'   combinations are found.
+#'
+#' @examples
+#' \donttest{
+#' n <- 40; pks <- c(30, 20)
+#' Y   <- ajive.data.sim(K = 2, rankJ = 2, rankA = c(4, 3),
+#'                       n = n, pks = pks, dist.type = 1)
+#' fit <- Rajive(Y$sim_data, c(4, 3))
+#'
+#' # Top 10 joint loadings across all blocks
+#' rank_features(fit, mode = "top_loadings", type = "joint", n = 10)
+#'
+#' # Proportional contribution (variance) for individual components
+#' rank_features(fit, mode = "contribution", type = "individual",
+#'               block = 1, component = 1, method = "variance_contrib")
+#'
+#' # Pairwise feature-set overlap across all blocks for joint component 1
+#' rank_features(fit, mode = "overlap", type = "joint", component = 1, n = 15)
+#'
+#' # Significant jackstraw features
+#' jsr <- jackstraw_rajive(fit, Y$sim_data)
+#' rank_features(jackstraw_result = jsr, mode = "significant", block = 1)
+#' }
+#'
+#' @export
+rank_features <- function(ajive_output    = NULL,
+                          blocks          = NULL,
+                          jackstraw_result = NULL,
+                          mode      = c("top_loadings", "contribution",
+                                        "overlap", "significant"),
+                          type      = c("joint", "individual"),
+                          block     = NULL,
+                          component = NULL,
+                          n         = 20L,
+                          signed    = TRUE,
+                          method    = NULL,
+                          ...) {
+  mode <- match.arg(mode)
+  type <- match.arg(type)
+  n    <- as.integer(n)
+  if (n < 1L) stop("`n` must be a positive integer.", call. = FALSE)
+
+  method <- .rf_resolve_method(method, mode)
+
+  switch(mode,
+    top_loadings = {
+      if (!inherits(ajive_output, "rajive"))
+        stop("`ajive_output` must be an object of class \"rajive\".", call. = FALSE)
+      .rf_loading_df(ajive_output, type, block, component, n, signed, method,
+                     add_contribution = FALSE)
+    },
+    contribution = {
+      if (!inherits(ajive_output, "rajive"))
+        stop("`ajive_output` must be an object of class \"rajive\".", call. = FALSE)
+      .rf_loading_df(ajive_output, type, block, component, n, signed, method,
+                     add_contribution = TRUE)
+    },
+    overlap = {
+      if (!inherits(ajive_output, "rajive"))
+        stop("`ajive_output` must be an object of class \"rajive\".", call. = FALSE)
+      .rf_overlap(ajive_output, type, block, component, n, method)
+    },
+    significant = {
+      .rf_significant(jackstraw_result, block, component)
+    }
+  )
+}
+
+
+# ---------------------------------------------------------------------------
+# Aliases (thin wrappers)
+# ---------------------------------------------------------------------------
+
+#' @rdname rank_features
+#' @export
+get_top_loadings <- function(ajive_output, block = NULL, component = NULL,
+                             type = c("joint", "individual"),
+                             n = 20L, signed = TRUE) {
+  rank_features(ajive_output, mode = "top_loadings", type = match.arg(type),
+                block = block, component = component, n = n, signed = signed)
+}
+
+#' @rdname rank_features
+#' @export
+get_feature_contributions <- function(ajive_output, block = NULL, component = NULL,
+                                      type   = c("joint", "individual"),
+                                      method = c("abs_loading",
+                                                 "variance_contrib")) {
+  rank_features(ajive_output, mode = "contribution", type = match.arg(type),
+                block = block, component = component,
+                method = match.arg(method))
+}
+
+#' @rdname rank_features
+#' @export
+compare_feature_sets_across_blocks <- function(ajive_output, component = NULL,
+                                               type   = c("joint", "individual"),
+                                               n      = 50L,
+                                               method = c("jaccard",
+                                                          "overlap_coef")) {
+  rank_features(ajive_output, mode = "overlap", type = match.arg(type),
+                component = component, n = n, method = match.arg(method))
+}
+
+#' @rdname rank_features
+#' @export
+summarize_significant_vars <- function(jackstraw_result, block = NULL,
+                                       component = NULL, top_n = NULL) {
+  out <- rank_features(jackstraw_result = jackstraw_result,
+                       mode = "significant", block = block,
+                       component = component)
+  if (!is.null(top_n) && !is.null(out)) {
+    grp <- paste(out$block, out$component)
+    out <- do.call(rbind, lapply(split(out, grp), function(df) {
+      df <- df[order(df$p_value), ]
+      head(df, as.integer(top_n))
+    }))
+    rownames(out) <- NULL
+  }
+  out
+}
+
+
+# ---------------------------------------------------------------------------
+# Internal: rank_features workers
+# ---------------------------------------------------------------------------
+
+.rf_resolve_method <- function(method, mode) {
+  if (is.null(method)) {
+    return(switch(mode,
+      top_loadings = "abs_loading",
+      contribution = "abs_loading",
+      overlap      = "jaccard",
+      significant  = NULL
+    ))
+  }
+  method <- match.arg(method, c("abs_loading", "variance_contrib",
+                                "jaccard", "overlap_coef"))
+  if (mode %in% c("top_loadings", "contribution") &&
+      method %in% c("jaccard", "overlap_coef"))
+    stop(sprintf(
+      "method = '%s' is not valid for mode = '%s'. Use 'abs_loading' or 'variance_contrib'.",
+      method, mode), call. = FALSE)
+  if (mode == "overlap" && method %in% c("abs_loading", "variance_contrib"))
+    stop(sprintf(
+      "method = '%s' is not valid for mode = 'overlap'. Use 'jaccard' or 'overlap_coef'.",
+      method), call. = FALSE)
+  method
+}
+
+# Returns loading matrix (features x components) for block k.
+# Individual: index 3*(k-1)+1; joint: index 3*(k-1)+2.
+.rf_get_loadings <- function(ajive_output, k, type) {
+  k   <- as.integer(k)
+  idx <- if (type == "individual") 3L * (k - 1L) + 1L else 3L * (k - 1L) + 2L
+  bd  <- ajive_output$block_decomps[[idx]]
+  if (is.null(bd) || is.null(bd$v) || ncol(bd$v) == 0L) return(NULL)
+  bd$v
+}
+
+.rf_loading_df <- function(ajive_output, type, block, component, n,
+                           signed, method, add_contribution) {
+  K        <- length(ajive_output$block_decomps) %/% 3L
+  blocks_k <- if (is.null(block)) seq_len(K) else as.integer(block)
+
+  rows <- list()
+  for (k in blocks_k) {
+    mat <- .rf_get_loadings(ajive_output, k, type)
+    if (is.null(mat)) next
+    n_comp     <- ncol(mat)
+    feat_names <- rownames(mat)
+    comps      <- if (is.null(component)) seq_len(n_comp) else as.integer(component)
+
+    for (j in comps) {
+      if (j > n_comp) next
+      load_j  <- mat[, j]
+      score_j <- if (method == "variance_contrib") {
+        ss <- sum(load_j^2)
+        if (ss == 0) rep(0, length(load_j)) else load_j^2 / ss
+      } else {
+        s1 <- sum(abs(load_j))
+        if (s1 == 0) rep(0, length(load_j)) else abs(load_j) / s1
+      }
+      n_take <- min(n, length(load_j))
+      ord    <- order(score_j, decreasing = TRUE)[seq_len(n_take)]
+
+      row_df <- data.frame(
+        block         = k,
+        component     = j,
+        type          = type,
+        feature_index = ord,
+        feature_name  = if (!is.null(feat_names)) feat_names[ord] else NA_character_,
+        loading       = if (signed) load_j[ord] else abs(load_j[ord]),
+        abs_loading   = abs(load_j[ord]),
+        stringsAsFactors = FALSE
+      )
+      if (add_contribution) row_df$contribution <- score_j[ord]
+      row_df$rank <- seq_len(n_take)
+      rows[[length(rows) + 1L]] <- row_df
+    }
+  }
+
+  if (length(rows) == 0L) {
+    message("No valid block/component combinations found. Returning NULL.")
+    return(NULL)
+  }
+  do.call(rbind, rows)
+}
+
+.rf_overlap <- function(ajive_output, type, block, component, n, method) {
+  K        <- length(ajive_output$block_decomps) %/% 3L
+  blocks_k <- if (is.null(block)) seq_len(K) else as.integer(block)
+  if (length(blocks_k) < 2L)
+    stop("mode = 'overlap' requires at least two blocks.", call. = FALSE)
+
+  # use first valid block to infer component count
+  ref_mat <- NULL
+  for (k in blocks_k) {
+    ref_mat <- .rf_get_loadings(ajive_output, k, type)
+    if (!is.null(ref_mat)) break
+  }
+  if (is.null(ref_mat))
+    stop("No valid loading matrices found for the requested blocks.", call. = FALSE)
+  n_comp <- ncol(ref_mat)
+  comps  <- if (is.null(component)) seq_len(n_comp) else as.integer(component)
+
+  rows <- list()
+  for (j in comps) {
+    feat_sets <- lapply(blocks_k, function(k) {
+      mat <- .rf_get_loadings(ajive_output, k, type)
+      if (is.null(mat) || j > ncol(mat)) return(integer(0L))
+      n_take <- min(n, nrow(mat))
+      order(abs(mat[, j]), decreasing = TRUE)[seq_len(n_take)]
+    })
+
+    nb <- length(blocks_k)
+    for (i in seq_len(nb - 1L)) {
+      for (jj in (i + 1L):nb) {
+        A       <- feat_sets[[i]]
+        B       <- feat_sets[[jj]]
+        n_inter <- length(intersect(A, B))
+        n_union <- length(union(A, B))
+        score   <- if (method == "jaccard") {
+          if (n_union == 0L) NA_real_ else n_inter / n_union
+        } else {
+          denom <- min(length(A), length(B))
+          if (denom == 0L) NA_real_ else n_inter / denom
+        }
+        rows[[length(rows) + 1L]] <- data.frame(
+          component     = j,
+          type          = type,
+          block_i       = blocks_k[i],
+          block_j       = blocks_k[jj],
+          top_n         = n,
+          method        = method,
+          n_intersect   = n_inter,
+          overlap_score = score,
+          stringsAsFactors = FALSE
+        )
+      }
+    }
+  }
+
+  if (length(rows) == 0L) return(NULL)
+  do.call(rbind, rows)
+}
+
+.rf_significant <- function(jackstraw_result, block, component) {
+  if (is.null(jackstraw_result))
+    stop("`jackstraw_result` must be provided for mode = \"significant\".",
+         call. = FALSE)
+  if (!inherits(jackstraw_result, "jackstraw_rajive"))
+    stop("`jackstraw_result` must be of class \"jackstraw_rajive\".",
+         call. = FALSE)
+
+  block_names <- names(jackstraw_result)
+  use_blocks  <- if (!is.null(block)) {
+    paste0("block", as.integer(block))
+  } else {
+    block_names
+  }
+
+  rows <- list()
+  for (bn in use_blocks) {
+    if (!bn %in% block_names) next
+    blk        <- jackstraw_result[[bn]]
+    comp_names <- names(blk)
+    use_comps  <- if (!is.null(component)) {
+      paste0("comp", as.integer(component))
+    } else {
+      comp_names
+    }
+    block_idx <- as.integer(sub("^block", "", bn))
+
+    for (cn in use_comps) {
+      if (!cn %in% comp_names) next
+      comp_idx <- as.integer(sub("^comp", "", cn))
+      cdata    <- blk[[cn]]
+      n_feat   <- length(cdata$p_values)
+
+      rows[[length(rows) + 1L]] <- data.frame(
+        block         = block_idx,
+        component     = comp_idx,
+        feature_index = seq_len(n_feat),
+        p_value       = cdata$p_values,
+        p_adj         = cdata$p_adj,
+        significant   = cdata$significant,
+        stringsAsFactors = FALSE
+      )
+    }
+  }
+
+  if (length(rows) == 0L) {
+    message("No valid block/component combinations found. Returning NULL.")
+    return(NULL)
+  }
+  out <- do.call(rbind, rows)
+  out[order(out$block, out$component, out$p_value), ]
 }
 

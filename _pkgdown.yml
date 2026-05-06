@@ -70,9 +70,14 @@ reference:
       - plot_scores
 
   - title: "Diagnostics and interpretation"
-    desc: "Unified helpers for AJIVE diagnostics, association testing, and stability assessment."
+    desc: "Unified helpers for AJIVE diagnostics, feature ranking, association testing, and stability assessment."
     contents:
       - extract_components
+      - rank_features
+      - get_top_loadings
+      - get_feature_contributions
+      - compare_feature_sets_across_blocks
+      - summarize_significant_vars
       - plot_components
       - associate_components
       - assess_stability

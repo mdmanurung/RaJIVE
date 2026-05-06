@@ -45,4 +45,4 @@ Imports: ggplot2,
 LinkingTo: Rcpp, RcppArmadillo
 URL: https://mdmanurung.github.io/rajiveplus/
 BugReports: https://github.com/mdmanurung/rajiveplus/issues
-RoxygenNote: 7.3.2
+RoxygenNote: 7.3.3
